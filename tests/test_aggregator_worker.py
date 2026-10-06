@@ -1,5 +1,7 @@
 """Tests for the LogAggregatorWorker reader loop, copy, and config apply hook."""
 
+import asyncio
+import contextlib
 import logging
 from unittest.mock import AsyncMock
 
@@ -111,6 +113,27 @@ async def test_refresh_streams_prunes_vanished_and_excludes_self(tmp_path) -> No
     # Only the non-excluded service is scanned.
     assert client.scan.await_count == 1
     assert client.scan.await_args.kwargs["match"] == "scietex:ModbusService:*:log"
+
+
+@pytest.mark.asyncio
+async def test_reader_loop_retries_expire_until_stream_exists(tmp_path) -> None:
+    """EXPIRE is retried each iteration until it succeeds (stream created)."""
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], ttl_seconds=3, scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    client.xread.return_value = None
+    # First EXPIRE misses (stream absent), second succeeds.
+    client.expire.side_effect = [False, True, True, True]
+
+    task = asyncio.create_task(worker._reader_loop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert client.expire.await_count >= 2
 
 
 @pytest.mark.asyncio

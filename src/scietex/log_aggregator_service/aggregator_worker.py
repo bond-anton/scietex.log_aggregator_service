@@ -19,7 +19,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, cast
 
-from glide import StreamAddOptions, StreamReadOptions, TrimByMaxLen
+from glide import GlideError, StreamAddOptions, StreamReadOptions, TrimByMaxLen
 from scietex.service import ValkeyWorker, ValkeyWorkerConfig
 
 from .config import AGGREGATOR_SECTION, LogAggregatorSettings, read_aggregator_config
@@ -123,8 +123,12 @@ class LogAggregatorWorker(ValkeyWorker):
                     settings_seen = settings
 
                 if settings.ttl_seconds > 0 and now - last_expire >= max(1.0, settings.ttl_seconds / 3):
-                    await client.expire(settings.target_stream, settings.ttl_seconds)
-                    last_expire = now
+                    # EXPIRE is a no-op until the target stream exists (the first
+                    # XADD creates it), so only advance the timer on success;
+                    # otherwise the long interval would delay the TTL until the
+                    # next window even though the stream now exists.
+                    if await client.expire(settings.target_stream, settings.ttl_seconds):
+                        last_expire = now
 
                 if not last_ids:
                     await asyncio.sleep(1.0)
@@ -141,6 +145,15 @@ class LogAggregatorWorker(ValkeyWorker):
                         last_ids[key] = entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
             except asyncio.CancelledError:
                 raise
+            except GlideError as exc:
+                # Mirror the framework transport: report to TransportHealth so
+                # the single reconnect owner recovers the shared client, then
+                # retry. GlideError covers ClosingError too, which the framework
+                # raises when its reconnect closes the client mid-read.
+                self.logger.debug("Log aggregation read failed: %s", exc)
+                self._health.report_failure(exc)
+                await self._health.recover()
+                await asyncio.sleep(1.0)
             except Exception:
                 self.logger.exception("Log aggregation iteration failed; continuing")
                 await asyncio.sleep(1.0)
