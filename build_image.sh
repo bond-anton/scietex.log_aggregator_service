@@ -60,8 +60,9 @@ main() {
 
     echo "Building multi-arch image version ${version}..."
 
-    # Build the multi-architecture image
-    if ! podman build --platform linux/amd64,linux/arm64 --manifest "${temp_manifest}" .; then
+    # Build the multi-architecture image. VERSION selects the published wheel to
+    # install, so the image matches the PyPI artifact for this version.
+    if ! podman build --platform linux/amd64,linux/arm64 --build-arg "VERSION=${version}" --manifest "${temp_manifest}" .; then
         echo "Error: Build failed" >&2
         return 1
     fi

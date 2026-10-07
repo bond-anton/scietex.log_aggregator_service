@@ -41,9 +41,15 @@ no extra wiring is needed.
 
 The `Containerfile` is a two-stage build on `python:3.13-slim-bookworm`:
 
-- **Builder stage** installs the package and its dependencies into `/opt/venv`.
+- **Builder stage** installs the released `scietex.log_aggregator_service` wheel
+  from PyPI (selected by the `VERSION` build arg) and its dependencies into
+  `/opt/venv`.
 - **Runtime stage** copies the venv, creates a non-root `appuser` (uid 1000),
   prepares `/config`, and runs `start-log-aggregator`.
+
+The image installs the published package rather than building from the local
+checkout, so the image and the PyPI artifact for a given version are the same
+code. The `VERSION` build arg must name a version that exists on PyPI.
 
 The image sets these defaults:
 
@@ -57,12 +63,14 @@ VOLUME ["/config"]
 ### Build
 
 ```bash
-podman build -t scietex-log-aggregator-service .
+podman build --build-arg VERSION=0.1.0 -t scietex-log-aggregator-service .
 ```
 
 `build_image.sh` builds a multi-arch manifest (`linux/amd64,linux/arm64`) and
 pushes it to `registry.buro-nts.ru/scietex-log-aggregator-service`, tagged with
-the version from `version.py`. Pass `--latest` to also push the `latest` tag.
+the version from `version.py`. It passes that version as the `VERSION` build arg,
+so the image always installs the matching PyPI release. Pass `--latest` to also
+push the `latest` tag.
 
 ### Run
 

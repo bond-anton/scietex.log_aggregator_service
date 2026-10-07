@@ -2,6 +2,12 @@
 # Set the base image using Python 3.13 and Debian Bookworm
 FROM python:3.13-slim-bookworm  as builder
 
+# Version of the published scietex.log_aggregator_service wheel to install.
+# build_image.sh passes the version read from
+# src/scietex/log_aggregator_service/version.py, so the image and the PyPI
+# artifact always match.
+ARG VERSION
+
 WORKDIR /app
 
 # Install system dependencies (required for some Python packages)
@@ -14,13 +20,11 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-COPY pyproject.toml .
-COPY README.md .
-COPY LICENSE .
-COPY src/ ./src/
+# Install the released package from PyPI. The image is a distribution channel of
+# the same tagged source that was published, so it does not build from the local
+# checkout.
 RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir .  # Installs your project in editable mode
+    pip install --no-cache-dir "scietex.log_aggregator_service==${VERSION}"
 
 # Stage 2: Runtime image
 FROM python:3.13-slim-bookworm
