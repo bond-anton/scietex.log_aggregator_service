@@ -152,3 +152,174 @@ async def test_initialize_fails_on_bad_config(tmp_path, monkeypatch) -> None:
 
     assert await worker.initialize() is False
     assert worker._reader_task is None
+
+
+@pytest.mark.asyncio
+async def test_initialize_starts_reader_task(tmp_path, monkeypatch) -> None:
+    """A successful initialize() creates the reader task and returns True."""
+
+    async def fake_initialize(self) -> bool:
+        return True
+
+    monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
+    worker = _make_worker(tmp_path)
+
+    assert await worker.initialize() is True
+    assert worker._reader_task is not None
+    assert worker._reader_task.get_name() == "LogAggregatorReader"
+
+    await worker.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cancels_running_reader_task(tmp_path, monkeypatch) -> None:
+    """cleanup() cancels the reader task and clears the reference."""
+
+    async def fake_initialize(self) -> bool:
+        return True
+
+    async def fake_cleanup(self) -> None:
+        return None
+
+    monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
+    monkeypatch.setattr(ValkeyWorker, "cleanup", fake_cleanup)
+    worker = _make_worker(tmp_path)
+    await worker.initialize()
+    task = worker._reader_task
+    assert task is not None
+
+    await worker.cleanup()
+
+    assert worker._reader_task is None
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_reader_loop_copies_entries_and_advances_last_ids(tmp_path) -> None:
+    """The happy path reads entries, copies them, and advances last_ids."""
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    client.xread.return_value = {
+        b"scietex:ModbusService:abc:log": {b"1-0": [(b"message", b"boot")]},
+    }
+
+    async def yield_to_loop(*args, **kwargs):
+        # The loop has no real I/O with mocked clients; yield so the test can
+        # cancel it and so the tight loop does not starve the event loop.
+        await asyncio.sleep(0.01)
+        return client.xread.return_value
+
+    client.xread.side_effect = yield_to_loop
+
+    task = asyncio.create_task(worker._reader_loop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    client.xadd.assert_awaited()
+    args, _ = client.xadd.await_args
+    assert args[0] == "scietex:log"
+    assert dict(args[1])["source"] == "ModbusService:abc"
+
+
+@pytest.mark.asyncio
+async def test_reader_loop_reports_glide_error_and_recovers(tmp_path, monkeypatch) -> None:
+    """A GlideError is reported to TransportHealth and recover() is awaited."""
+    from glide import RequestError
+
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    client.xread.side_effect = RequestError("boom")
+    report_failure = AsyncMock()
+    recover = AsyncMock()
+    monkeypatch.setattr(worker._health, "report_failure", report_failure)
+    monkeypatch.setattr(worker._health, "recover", recover)
+
+    task = asyncio.create_task(worker._reader_loop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    report_failure.assert_called()
+    recover.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reader_loop_logs_unexpected_exception_and_continues(tmp_path, caplog) -> None:
+    """A non-Glide exception is logged at exception level and the loop continues."""
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    client.xread.side_effect = ValueError("unexpected")
+
+    with caplog.at_level(logging.ERROR):
+        task = asyncio.create_task(worker._reader_loop())
+        await asyncio.sleep(0.2)
+        # The loop caught the error and is still running (not exited).
+        assert not task.done()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert any("iteration failed" in record.message for record in caplog.records)
+    assert client.xread.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_reader_loop_rescans_when_settings_change(tmp_path) -> None:
+    """A new settings object forces an immediate SCAN, bypassing the interval."""
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    # A long scan interval: only the identity change can trigger a second SCAN.
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=3600.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+
+    async def yield_to_loop(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        return None
+
+    client.xread.side_effect = yield_to_loop
+
+    task = asyncio.create_task(worker._reader_loop())
+    await asyncio.sleep(0.1)
+    assert client.scan.await_count == 1
+
+    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=3600.0)
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert client.scan.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_streams_follows_scan_cursor(tmp_path) -> None:
+    """SCAN pagination is followed until the cursor returns to zero."""
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    client.scan.side_effect = [
+        (b"7", [b"scietex:ModbusService:a:log"]),
+        (b"0", [b"scietex:ModbusService:b:log"]),
+    ]
+    settings = LogAggregatorSettings(source_services=["ModbusService"])
+    last_ids: dict[str, str] = {}
+
+    await worker._refresh_streams(settings, last_ids)
+
+    assert client.scan.await_count == 2
+    assert client.scan.await_args_list[0].args[0] == b"0"
+    assert client.scan.await_args_list[1].args[0] == b"7"
+    assert set(last_ids) == {"scietex:ModbusService:a:log", "scietex:ModbusService:b:log"}

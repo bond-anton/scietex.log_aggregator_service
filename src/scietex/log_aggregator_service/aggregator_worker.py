@@ -101,8 +101,11 @@ class LogAggregatorWorker(ValkeyWorker):
         to the last entry id read, and a multi-key ``XREAD`` merges them. The
         source set is refreshed by SCAN on a timer (and immediately when the
         settings object changes), so workers appearing or disappearing are
-        handled without per-stream tasks. Any iteration error is logged and the
-        loop continues; only cancellation ends it.
+        handled without per-stream tasks. A ``GlideError`` is reported to
+        ``TransportHealth`` (logged at debug) so the framework's single
+        reconnect owner recovers the client; any other exception is logged at
+        exception level. Either way the loop continues; only cancellation ends
+        it.
         """
         last_ids: dict[str, str] = {}
         settings_seen: LogAggregatorSettings | None = None
