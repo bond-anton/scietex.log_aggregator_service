@@ -39,11 +39,12 @@ no extra wiring is needed.
 
 ## Container image
 
-The `Containerfile` is a two-stage build on `python:3.13-slim-bookworm`:
+The `Containerfile` is a two-stage build on `python:3.14-slim-trixie`:
 
 - **Builder stage** installs the released `scietex.log_aggregator_service` wheel
   from PyPI (selected by the `VERSION` build arg) and its dependencies into
-  `/opt/venv`.
+  `/opt/venv`, then slims the venv (drops pip/setuptools/wheel, bytecode caches,
+  and the unused per-interpreter `glide_shared` extensions).
 - **Runtime stage** copies the venv, creates a non-root `appuser` (uid 1000),
   prepares `/config`, and runs `start-log-aggregator`.
 

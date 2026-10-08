@@ -1,6 +1,6 @@
 # Stage 1: Build Python dependencies
-# Set the base image using Python 3.13 and Debian Bookworm
-FROM python:3.13-slim-bookworm  as builder
+# Set the base image using Python 3.14 and Debian Trixie (current stable)
+FROM python:3.14-slim-trixie  as builder
 
 # Version of the published scietex.log_aggregator_service wheel to install.
 # build_image.sh passes the version read from
@@ -23,11 +23,20 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install the released package from PyPI. The image is a distribution channel of
 # the same tagged source that was published, so it does not build from the local
 # checkout.
+# Then slim the venv: pip/setuptools/wheel are build-time only, bytecode caches
+# are regenerated on first import, and valkey-glide ships one _fast_response
+# extension per supported interpreter (cp39..cp314, pypy) while only the running
+# interpreter's is ever loaded.
 RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir "scietex.log_aggregator_service==${VERSION}"
+    pip install --no-cache-dir "scietex.log_aggregator_service==${VERSION}" && \
+    pip uninstall -y pip setuptools wheel && \
+    find /opt/venv -name '*.pyc' -delete && \
+    find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + && \
+    find /opt/venv/lib/python3.14/site-packages/glide_shared -name '*.so' \
+        ! -name '*cpython-314*' ! -name 'libglide_ffi.so' -delete
 
 # Stage 2: Runtime image
-FROM python:3.13-slim-bookworm
+FROM python:3.14-slim-trixie
 
 WORKDIR /app
 
