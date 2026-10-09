@@ -64,7 +64,7 @@ VOLUME ["/config"]
 ### Build
 
 ```bash
-podman build --build-arg VERSION=0.1.0 -t scietex-log-aggregator-service .
+podman build --build-arg VERSION=0.2.0 -t scietex-log-aggregator-service .
 ```
 
 `build_image.sh` builds a multi-arch manifest (`linux/amd64,linux/arm64`) and
@@ -96,13 +96,16 @@ there so configuration survives container replacement:
 The service writes its files under `/config/log_aggregator/`:
 
 ```
-/config/log_aggregator/log_aggregator.yml   # service bootstrap
-/config/log_aggregator/config.yml           # framework snapshot (remote config)
+/config/log_aggregator/log_aggregator.yml   # L1 bootstrap patch (service-owned)
+/config/log_aggregator/config.yml           # L2 snapshot (framework-owned)
 ```
 
 On first run, `log_aggregator.yml` is created with defaults. Edit it on the host
-and restart the container to apply changes. See the
-[README](../README.md#configuration-at-a-glance) for the settings table.
+and restart the container to apply changes. The framework's `config.yml` snapshot
+is written automatically after a successful remote apply and overlays the
+bootstrap on the next start; the remote `log_aggregator` section (L3) overlays
+both. See the [README](../README.md#configuration-at-a-glance) for the settings
+table.
 
 ## Stream-name coupling
 

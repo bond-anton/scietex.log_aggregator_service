@@ -22,7 +22,7 @@ from typing import Any, cast
 from glide import GlideError, StreamAddOptions, StreamReadOptions, TrimByMaxLen
 from scietex.service import ValkeyWorker, ValkeyWorkerConfig
 
-from .config import AGGREGATOR_SECTION, LogAggregatorSettings, read_aggregator_config
+from .config import AGGREGATOR_SECTION, AGGREGATOR_SETTINGS_DEFAULTS, LogAggregatorSettings, read_aggregator_config
 
 #: Suffix of a per-worker log stream key: ``scietex:{service}:{instance_id}:log``.
 _LOG_STREAM_SUFFIX: str = ":log"
@@ -31,8 +31,10 @@ _LOG_STREAM_SUFFIX: str = ":log"
 class LogAggregatorWorker(ValkeyWorker):
     """A `ValkeyWorker` that aggregates per-worker log streams into one stream.
 
-    Settings precedence: constructor default < ``log_aggregator.yml`` < framework
-    ``config.yml`` / remote ``log_aggregator`` section. The reader loop starts
+    Settings are resolved by the framework's four-layer merge: constructor
+    default (L0) < ``log_aggregator.yml`` (L1) < framework ``config.yml`` (L2)
+    < remote ``log_aggregator`` section (L3). Each layer is a field-level patch
+    (absent = inherit, ``null`` = clear, value = set). The reader loop starts
     after `super().initialize()` so the remote apply (which runs the
     ``log_aggregator`` section hook) has already updated ``self._settings``.
     """
@@ -41,7 +43,13 @@ class LogAggregatorWorker(ValkeyWorker):
         super().__init__(config, client_factory=client_factory, theme=theme)
         self._settings: LogAggregatorSettings | None = None
         self._reader_task: asyncio.Task | None = None
-        self.register_config_settings(AGGREGATOR_SECTION, LogAggregatorSettings, apply=self._apply_settings)
+        self.register_config_settings(
+            AGGREGATOR_SECTION,
+            LogAggregatorSettings,
+            apply=self._apply_settings,
+            defaults=AGGREGATOR_SETTINGS_DEFAULTS,
+            bootstrap=lambda: read_aggregator_config(self.conf_dir),
+        )
 
     @property
     def aggregator_settings(self) -> LogAggregatorSettings | None:
@@ -49,24 +57,27 @@ class LogAggregatorWorker(ValkeyWorker):
         return self._settings
 
     async def initialize(self) -> bool:
-        """Load settings, initialize the framework, then start the reader loop.
+        """Initialize the framework, resolve merged settings, then start the reader loop.
 
-        The reader loop is started only after `super().initialize()` succeeds, so
-        the remote config apply has already run and ``self._settings`` reflects
-        the effective configuration.
+        Settings come from the framework's layered resolution, not a direct file
+        read: `super().initialize()` seeds the L1 bootstrap (the only place
+        ``read_aggregator_config`` runs) and resolves L0+L1; the remote apply
+        then overlays L2/L3. The merged struct is read via
+        `current_config_settings` and stored as ``self._settings`` before the
+        reader loop starts.
 
         Returns:
-            `True` if the framework initialized and the reader loop started;
-            `False` on any configuration or startup failure.
+            `True` if the framework initialized, the merged settings resolved,
+            and the reader loop started; `False` on any startup failure.
         """
-        try:
-            self._settings = read_aggregator_config(self.conf_dir)
-        except RuntimeError as exc:
-            self.logger.error("Failed to load log aggregator configuration: %s", exc)
-            return False
-
         if not await super().initialize():
             return False
+
+        settings = self.current_config_settings(AGGREGATOR_SECTION)
+        if settings is None:
+            self.logger.error("Log aggregator settings were not resolved before reader startup")
+            return False
+        self._settings = cast(LogAggregatorSettings, settings)
 
         self._reader_task = asyncio.create_task(self._reader_loop(), name="LogAggregatorReader")
         return True
@@ -81,11 +92,13 @@ class LogAggregatorWorker(ValkeyWorker):
         await super().cleanup()
 
     def _apply_settings(self, settings: LogAggregatorSettings) -> None:
-        """Store remote aggregator settings; the reader loop picks them up.
+        """Store the merged aggregator settings; the reader loop picks them up.
 
-        The loop detects the settings object identity change and forces a SCAN,
-        so a changed ``source_services`` set is reflected without restarting the
-        task. ``max_len`` and ``ttl_seconds`` apply on the next iteration.
+        The framework passes the fully merged struct (L0+L1+L2+L3), not the
+        remote layer alone. The loop detects the settings object identity change
+        and forces a SCAN, so a changed ``source_services`` set is reflected
+        without restarting the task. ``max_len`` and ``ttl_seconds`` apply on the
+        next iteration.
         """
         self._settings = settings
         self.logger.info(

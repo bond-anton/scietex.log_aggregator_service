@@ -1,14 +1,15 @@
 """Configuration models and YAML loader for the log aggregator service.
 
-`LogAggregatorSettings` is the service-owned bootstrap snapshot stored in
-``log_aggregator.yml`` under the config directory. It is kept deliberately thin:
-it names the source services to aggregate, the target stream, and the retention
-policy the aggregator enforces on that stream.
+`LogAggregatorSettings` is the concrete settings struct: it names the source
+services to aggregate, the target stream, and the retention policy the
+aggregator enforces on that stream. It is the L0 base and the validation target
+of the framework's four-layer config merge (constructor default <
+``log_aggregator.yml`` < ``config.yml`` < remote ``log_aggregator`` section).
 
 The aggregator is the sole writer of the target stream, so it owns both the
 ``MAXLEN`` trim and the whole-key ``EXPIRE``. The API delivers these values as
-the remote ``log_aggregator`` section; the local YAML is only the bootstrap
-fallback used before the first remote apply.
+the remote ``log_aggregator`` section; ``log_aggregator.yml`` is the L1
+bootstrap patch read before the first remote apply.
 """
 
 from pathlib import Path
@@ -24,7 +25,7 @@ AGGREGATOR_SECTION: str = "log_aggregator"
 #: (the framework resolves a single dir for all scietex services) cannot collide.
 AGGREGATOR_CONFIG_SUBDIR: str = "log_aggregator"
 
-#: Filename of the service-owned bootstrap snapshot in the config subdirectory.
+#: Filename of the service-owned L1 bootstrap patch in the config subdirectory.
 AGGREGATOR_CONFIG_FILE: str = "log_aggregator.yml"
 
 
@@ -49,16 +50,28 @@ class LogAggregatorSettings(msgspec.Struct, frozen=True, forbid_unknown_fields=T
     scan_interval: float = 15.0
 
 
-def read_aggregator_config(conf_dir: Path | None, *, create_default: bool = True) -> LogAggregatorSettings:
-    """Read aggregator settings from ``log_aggregator/log_aggregator.yml``.
+#: Concrete L0 base instance for the framework's layered config merge. The
+#: framework folds the L1 patch (``log_aggregator.yml``), the ``config.yml``
+#: snapshot (L2), and the remote ``log_aggregator`` section (L3) over this struct;
+#: a field absent from every layer falls back to the default defined here.
+AGGREGATOR_SETTINGS_DEFAULTS: LogAggregatorSettings = LogAggregatorSettings()
+
+
+def read_aggregator_config(conf_dir: Path | None, *, create_default: bool = True) -> dict[str, object]:
+    """Read the ``log_aggregator/log_aggregator.yml`` L1 patch as a plain dict.
+
+    Returns the parsed YAML map as a plain dict — the L1 patch of the framework's
+    layered merge, not a validated struct. The framework converts it through
+    `LogAggregatorSettings` (validating and coercing) when it resolves the
+    section, so this loader only hands back the raw keys present in the file.
 
     The service's files are namespaced in a ``log_aggregator/`` subdirectory so
     they do not collide with other services sharing the framework's single config
-    dir. Mirrors `read_modbus_config`: the file (and, when missing, its
-    directory) is only created when ``create_default=True`` (the bootstrap path).
-    A ``None`` or non-directory ``conf_dir``, a missing file/directory with
-    ``create_default=False``, or an unparseable file each raise `RuntimeError`.
-    An existing-but-invalid file is left untouched regardless of ``create_default``.
+    dir. The file (and, when missing, its directory) is only created when
+    ``create_default=True`` (the bootstrap path). A ``None`` or non-directory
+    ``conf_dir``, a missing file/directory with ``create_default=False``, or an
+    unparseable file each raise `RuntimeError`. An existing-but-invalid file is
+    left untouched regardless of ``create_default``.
 
     Args:
         conf_dir: Path to the configuration directory.
@@ -66,7 +79,8 @@ def read_aggregator_config(conf_dir: Path | None, *, create_default: bool = True
             ``log_aggregator.yml`` when missing. Default ``True``.
 
     Returns:
-        A `LogAggregatorSettings` loaded from ``log_aggregator.yml`` or defaults.
+        The parsed ``log_aggregator.yml`` map as a dict (the L1 patch), or the
+        builtins of `LogAggregatorSettings()` when the file was just created.
 
     Raises:
         RuntimeError: If ``conf_dir`` is ``None`` or not a directory, the file
@@ -93,14 +107,14 @@ def read_aggregator_config(conf_dir: Path | None, *, create_default: bool = True
             settings = LogAggregatorSettings()
             with open(config_yml, "wb") as f:
                 f.write(msgspec.yaml.encode(settings))
-            return settings
+            return msgspec.to_builtins(settings)
         raise RuntimeError(
             f"Log aggregator configuration file {config_yml} does not exist and create_default=False "
             "(pass create_default=True to generate defaults)."
         )
     try:
         with open(config_yml, "rb") as f:
-            return msgspec.yaml.decode(f.read(), type=LogAggregatorSettings, strict=True)
+            return msgspec.yaml.decode(f.read(), type=dict)
     except Exception as exc:
         raise RuntimeError(
             f"Failed to parse log aggregator configuration file {config_yml}. "

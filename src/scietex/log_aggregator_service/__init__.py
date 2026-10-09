@@ -5,6 +5,7 @@ from .config import (
     AGGREGATOR_CONFIG_FILE,
     AGGREGATOR_CONFIG_SUBDIR,
     AGGREGATOR_SECTION,
+    AGGREGATOR_SETTINGS_DEFAULTS,
     LogAggregatorSettings,
     read_aggregator_config,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "AGGREGATOR_CONFIG_FILE",
     "AGGREGATOR_CONFIG_SUBDIR",
     "AGGREGATOR_SECTION",
+    "AGGREGATOR_SETTINGS_DEFAULTS",
     "LogAggregatorSettings",
     "read_aggregator_config",
 ]

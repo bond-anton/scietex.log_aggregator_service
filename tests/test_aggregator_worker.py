@@ -9,7 +9,7 @@ import pytest
 from scietex.service import ValkeyWorker, ValkeyWorkerConfig
 
 from scietex.log_aggregator_service.aggregator_worker import LogAggregatorWorker, _source_label
-from scietex.log_aggregator_service.config import LogAggregatorSettings
+from scietex.log_aggregator_service.config import AGGREGATOR_SECTION, LogAggregatorSettings
 
 
 def _make_worker(tmp_path) -> LogAggregatorWorker:
@@ -138,9 +138,15 @@ async def test_reader_loop_retries_expire_until_stream_exists(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_initialize_fails_on_bad_config(tmp_path, monkeypatch) -> None:
-    """A config load failure returns False without starting the reader loop."""
+    """A bootstrap failure leaves settings unresolved, so initialize() returns False.
+
+    In v6 the file is read by the bootstrap provider inside
+    `seed_config_bootstrap()`; a `RuntimeError` there is caught by the framework,
+    the section stays unresolved, and `current_config_settings` returns ``None``.
+    """
 
     async def fake_initialize(self) -> bool:
+        self.seed_config_bootstrap()
         return True
 
     monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
@@ -163,12 +169,57 @@ async def test_initialize_starts_reader_task(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
     worker = _make_worker(tmp_path)
+    monkeypatch.setattr(worker, "current_config_settings", lambda name: LogAggregatorSettings())
 
     assert await worker.initialize() is True
     assert worker._reader_task is not None
     assert worker._reader_task.get_name() == "LogAggregatorReader"
 
     await worker.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_initialize_uses_merged_settings(tmp_path, monkeypatch) -> None:
+    """initialize() stores the L0+L1 merged struct, not the raw file read."""
+
+    async def fake_initialize(self) -> bool:
+        self.seed_config_bootstrap()
+        return True
+
+    monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
+    worker = _make_worker(tmp_path)
+    monkeypatch.setattr(
+        "scietex.log_aggregator_service.aggregator_worker.read_aggregator_config",
+        lambda *a, **k: {"max_len": 42},
+    )
+
+    assert await worker.initialize() is True
+    assert worker.aggregator_settings.max_len == 42
+    # A field absent from the patch keeps its L0 default.
+    assert worker.aggregator_settings.target_stream == "scietex:log"
+
+    await worker.cleanup()
+
+
+def test_bootstrap_provider_returns_patch_dict(tmp_path, monkeypatch) -> None:
+    """seed_config_bootstrap resolves a section whose bootstrap returns a partial dict.
+
+    The bootstrap provider's return value is stored verbatim as the L1 patch and
+    folded over the L0 base, so it must be a plain dict — proving the dict path
+    end-to-end: a partial patch resolves with the untouched fields still at L0.
+    """
+    worker = _make_worker(tmp_path)
+    monkeypatch.setattr(
+        "scietex.log_aggregator_service.aggregator_worker.read_aggregator_config",
+        lambda *a, **k: {"max_len": 42},
+    )
+
+    worker.seed_config_bootstrap()
+
+    resolved = worker.current_config_settings(AGGREGATOR_SECTION)
+    assert isinstance(resolved, LogAggregatorSettings)
+    assert resolved.max_len == 42
+    assert resolved.target_stream == "scietex:log"
 
 
 @pytest.mark.asyncio
@@ -184,6 +235,7 @@ async def test_cleanup_cancels_running_reader_task(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(ValkeyWorker, "initialize", fake_initialize)
     monkeypatch.setattr(ValkeyWorker, "cleanup", fake_cleanup)
     worker = _make_worker(tmp_path)
+    monkeypatch.setattr(worker, "current_config_settings", lambda name: LogAggregatorSettings())
     await worker.initialize()
     task = worker._reader_task
     assert task is not None

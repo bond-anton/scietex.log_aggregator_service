@@ -11,7 +11,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "scietex.service[valkey]~=5.2.0",
+  "scietex.service[valkey]~=6.0.0",
 ]
 dynamic = ["version"]
 

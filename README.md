@@ -55,7 +55,11 @@ transport).
 
 The service reads `log_aggregator.yml` from a `log_aggregator/` subdirectory of
 its config directory. Create it by hand, or let the service generate defaults on
-first run:
+first run. The file is the bootstrap layer of a four-layer merge: constructor
+defaults < `log_aggregator.yml` < the framework's `config.yml` snapshot < the
+remote `log_aggregator` section. Each layer is a field-level patch — a key absent
+from a layer inherits the layer below, `null` clears it back to the constructor
+default, and a value sets it:
 
 ```yaml
 source_services:
@@ -89,6 +93,9 @@ curl -X POST http://localhost:8000/api/v1/services/discovered/LogAggregatorServi
 ```
 
 ## Configuration at a glance
+
+The defaults below are the constructor (L0) values: a field absent from every
+layer, or explicitly cleared with `null`, resolves to the value shown.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
