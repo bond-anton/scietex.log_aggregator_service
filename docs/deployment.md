@@ -64,7 +64,7 @@ VOLUME ["/config"]
 ### Build
 
 ```bash
-podman build --build-arg VERSION=0.2.0 -t scietex-log-aggregator-service .
+podman build --build-arg VERSION=0.3.0 -t scietex-log-aggregator-service .
 ```
 
 `build_image.sh` builds a multi-arch manifest (`linux/amd64,linux/arm64`) and
