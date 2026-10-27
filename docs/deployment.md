@@ -17,7 +17,7 @@ It accepts three flags:
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--conf-dir` | auto-resolved | Configuration directory |
-| `--service-name` | `$SCIETEX_SERVICE_NAME` or `LogAggregatorService` | Service name reported to the framework |
+| `--service-name` | `$SCIETEX_SERVICE_NAME` or `LogAggregator` | Service name reported to the framework |
 | `--logging-level` | `$SCIETEX_LOGGING_LEVEL` or `INFO` | Logging level |
 
 Precedence is **CLI flag > environment variable > built-in default**. The
@@ -33,7 +33,7 @@ no extra wiring is needed.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SCIETEX_CONFIG_DIR` | Config-directory candidate (used if set and an existing dir) | unset |
-| `SCIETEX_SERVICE_NAME` | Fallback for `--service-name` | `LogAggregatorService` |
+| `SCIETEX_SERVICE_NAME` | Fallback for `--service-name` | `LogAggregator` |
 | `SCIETEX_LOGGING_LEVEL` | Fallback for `--logging-level` | `INFO` |
 | `XDG_CONFIG_HOME` | XDG base dir; candidate becomes `$XDG_CONFIG_HOME/scietex` | unset → `~/.config/scietex` |
 
@@ -56,7 +56,7 @@ The image sets these defaults:
 
 ```dockerfile
 ENV SCIETEX_CONFIG_DIR=/config \
-    SCIETEX_SERVICE_NAME=LogAggregatorService \
+    SCIETEX_SERVICE_NAME=LogAggregator \
     SCIETEX_LOGGING_LEVEL=INFO
 VOLUME ["/config"]
 ```
@@ -119,14 +119,14 @@ once the service is registered.
 Register the service so the backend can deliver that section:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/services/discovered/LogAggregatorService/register \
+curl -X POST http://localhost:8000/api/v1/services/discovered/LogAggregator/register \
   -H 'Content-Type: application/json' \
   -d '{"description": "Aggregates per-worker log streams into the shared system log stream."}'
 ```
 
 The service type is resolved from the plugin matcher, so no `service_type_id` is
 needed. Re-deliver on demand with
-`POST /api/v1/services/LogAggregatorService/publish`.
+`POST /api/v1/services/LogAggregator/publish`.
 
 ## Health and shutdown
 

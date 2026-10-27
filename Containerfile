@@ -54,7 +54,7 @@ RUN useradd -m -u 1000 appuser && \
 # SCIETEX_CONFIG_DIR is honored by the framework's prepare_conf_dir; the service
 # namespaces its files under <config-dir>/log_aggregator/.
 ENV SCIETEX_CONFIG_DIR=/config \
-    SCIETEX_SERVICE_NAME=LogAggregatorService \
+    SCIETEX_SERVICE_NAME=LogAggregator \
     SCIETEX_LOGGING_LEVEL=INFO
 RUN mkdir -p /config && chown appuser:appuser /config
 VOLUME ["/config"]

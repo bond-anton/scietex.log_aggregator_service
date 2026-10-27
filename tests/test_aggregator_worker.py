@@ -47,7 +47,7 @@ async def test_cleanup_safe_when_never_started(tmp_path) -> None:
 def test_apply_hook_stores_settings(tmp_path, caplog) -> None:
     """The apply hook stores the settings and logs the source count."""
     worker = _make_worker(tmp_path)
-    settings = LogAggregatorSettings(source_services=["ModbusService"])
+    settings = LogAggregatorSettings(source_services=["ModbusGateway"])
 
     with caplog.at_level(logging.INFO):
         worker._apply_settings(settings)
@@ -102,8 +102,8 @@ async def test_refresh_streams_prunes_vanished_and_excludes_self(tmp_path) -> No
     worker._client = client
     client.scan.return_value = (b"0", [b"scietex:modbus:abc123:log"])
     settings = LogAggregatorSettings(
-        source_services=["ModbusService", "LogAggregatorService"],
-        exclude_services=["LogAggregatorService"],
+        source_services=["ModbusGateway", "LogAggregator"],
+        exclude_services=["LogAggregator"],
     )
     last_ids = {"scietex:modbus:gone:log": "5-0"}
 
@@ -112,7 +112,7 @@ async def test_refresh_streams_prunes_vanished_and_excludes_self(tmp_path) -> No
     assert last_ids == {"scietex:modbus:abc123:log": "0"}
     # Only the non-excluded service is scanned.
     assert client.scan.await_count == 1
-    assert client.scan.await_args.kwargs["match"] == "scietex:ModbusService:*:log"
+    assert client.scan.await_args.kwargs["match"] == "scietex:ModbusGateway:*:log"
 
 
 @pytest.mark.asyncio
@@ -121,8 +121,8 @@ async def test_reader_loop_retries_expire_until_stream_exists(tmp_path) -> None:
     worker = _make_worker(tmp_path)
     client = AsyncMock()
     worker._client = client
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], ttl_seconds=3, scan_interval=0.0)
-    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], ttl_seconds=3, scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
     client.xread.return_value = None
     # First EXPIRE misses (stream absent), second succeeds.
     client.expire.side_effect = [False, True, True, True]
@@ -252,10 +252,10 @@ async def test_reader_loop_copies_entries_and_advances_last_ids(tmp_path) -> Non
     worker = _make_worker(tmp_path)
     client = AsyncMock()
     worker._client = client
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
-    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
     client.xread.return_value = {
-        b"scietex:ModbusService:abc:log": {b"1-0": [(b"message", b"boot")]},
+        b"scietex:ModbusGateway:abc:log": {b"1-0": [(b"message", b"boot")]},
     }
 
     async def yield_to_loop(*args, **kwargs):
@@ -275,7 +275,7 @@ async def test_reader_loop_copies_entries_and_advances_last_ids(tmp_path) -> Non
     client.xadd.assert_awaited()
     args, _ = client.xadd.await_args
     assert args[0] == "scietex:log"
-    assert dict(args[1])["source"] == "ModbusService:abc"
+    assert dict(args[1])["source"] == "ModbusGateway:abc"
 
 
 @pytest.mark.asyncio
@@ -286,8 +286,8 @@ async def test_reader_loop_reports_glide_error_and_recovers(tmp_path, monkeypatc
     worker = _make_worker(tmp_path)
     client = AsyncMock()
     worker._client = client
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
-    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
     client.xread.side_effect = RequestError("boom")
     report_failure = AsyncMock()
     recover = AsyncMock()
@@ -310,8 +310,8 @@ async def test_reader_loop_logs_unexpected_exception_and_continues(tmp_path, cap
     worker = _make_worker(tmp_path)
     client = AsyncMock()
     worker._client = client
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=0.0)
-    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=0.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
     client.xread.side_effect = ValueError("unexpected")
 
     with caplog.at_level(logging.ERROR):
@@ -334,8 +334,8 @@ async def test_reader_loop_rescans_when_settings_change(tmp_path) -> None:
     client = AsyncMock()
     worker._client = client
     # A long scan interval: only the identity change can trigger a second SCAN.
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=3600.0)
-    client.scan.return_value = (b"0", [b"scietex:ModbusService:abc:log"])
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=3600.0)
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
 
     async def yield_to_loop(*args, **kwargs):
         await asyncio.sleep(0.01)
@@ -347,7 +347,7 @@ async def test_reader_loop_rescans_when_settings_change(tmp_path) -> None:
     await asyncio.sleep(0.1)
     assert client.scan.await_count == 1
 
-    worker._settings = LogAggregatorSettings(source_services=["ModbusService"], scan_interval=3600.0)
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=3600.0)
     await asyncio.sleep(0.1)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -363,10 +363,10 @@ async def test_refresh_streams_follows_scan_cursor(tmp_path) -> None:
     client = AsyncMock()
     worker._client = client
     client.scan.side_effect = [
-        (b"7", [b"scietex:ModbusService:a:log"]),
-        (b"0", [b"scietex:ModbusService:b:log"]),
+        (b"7", [b"scietex:ModbusGateway:a:log"]),
+        (b"0", [b"scietex:ModbusGateway:b:log"]),
     ]
-    settings = LogAggregatorSettings(source_services=["ModbusService"])
+    settings = LogAggregatorSettings(source_services=["ModbusGateway"])
     last_ids: dict[str, str] = {}
 
     await worker._refresh_streams(settings, last_ids)
@@ -374,4 +374,4 @@ async def test_refresh_streams_follows_scan_cursor(tmp_path) -> None:
     assert client.scan.await_count == 2
     assert client.scan.await_args_list[0].args[0] == b"0"
     assert client.scan.await_args_list[1].args[0] == b"7"
-    assert set(last_ids) == {"scietex:ModbusService:a:log", "scietex:ModbusService:b:log"}
+    assert set(last_ids) == {"scietex:ModbusGateway:a:log", "scietex:ModbusGateway:b:log"}

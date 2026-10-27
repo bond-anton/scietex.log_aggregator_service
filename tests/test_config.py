@@ -84,9 +84,9 @@ def test_read_aggregator_config_roundtrips_values(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text(
         "source_services:\n"
-        "  - ModbusService\n"
+        "  - ModbusGateway\n"
         "exclude_services:\n"
-        "  - LogAggregatorService\n"
+        "  - LogAggregator\n"
         "target_stream: scietex:log\n"
         "max_len: 500\n"
         "ttl_seconds: 60\n"
@@ -94,8 +94,8 @@ def test_read_aggregator_config_roundtrips_values(tmp_path: Path) -> None:
 
     result = read_aggregator_config(tmp_path)
 
-    assert result["source_services"] == ["ModbusService"]
-    assert result["exclude_services"] == ["LogAggregatorService"]
+    assert result["source_services"] == ["ModbusGateway"]
+    assert result["exclude_services"] == ["LogAggregator"]
     assert result["target_stream"] == "scietex:log"
     assert result["max_len"] == 500
     assert result["ttl_seconds"] == 60

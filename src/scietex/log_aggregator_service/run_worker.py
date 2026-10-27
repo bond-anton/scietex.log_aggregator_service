@@ -15,7 +15,7 @@ from .version import __version__
 ENV_SERVICE_NAME: str = "SCIETEX_SERVICE_NAME"
 ENV_LOGGING_LEVEL: str = "SCIETEX_LOGGING_LEVEL"
 
-DEFAULT_SERVICE_NAME: str = "LogAggregatorService"
+DEFAULT_SERVICE_NAME: str = "LogAggregator"
 DEFAULT_LOGGING_LEVEL: str = "INFO"
 
 

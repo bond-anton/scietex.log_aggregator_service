@@ -25,8 +25,8 @@ scietex:{svcN}:{inst}:log  ─┘ ───────────────�
    ▲ each writer owns its stream                   │ EXPIRE ttl     │
    │ (worker heartbeat refreshes its TTL)          └────────────────┘
                                                    ▲ single owner
-                                   ┌───────────────┴────────────────┐
-                                   │ LogAggregatorService worker     │
+                                   ┌─────────────────────────────────┐
+                                   │ LogAggregator worker            │
                                    │ (reads scietex:{agg}:config)    │
                                    └─────────────────────────────────┘
 ```
@@ -63,9 +63,9 @@ default, and a value sets it:
 
 ```yaml
 source_services:
-  - ModbusService
+  - ModbusGateway
 exclude_services:
-  - LogAggregatorService
+  - LogAggregator
 target_stream: scietex:log
 max_len: 100000
 ttl_seconds: 604800
@@ -89,7 +89,7 @@ The backend is the config authority: register the service so it can deliver the
 `log_aggregator` section (source services, target stream, `max_len`, `ttl`):
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/services/discovered/LogAggregatorService/register
+curl -X POST http://localhost:8000/api/v1/services/discovered/LogAggregator/register
 ```
 
 ## Configuration at a glance
