@@ -119,6 +119,17 @@ class LogAggregatorWorker(ValkeyWorker):
         reconnect owner recovers the client; any other exception is logged at
         exception level. Either way the loop continues; only cancellation ends
         it.
+
+        The read is non-blocking and ``block_ms`` is the idle poll interval.
+        The client is shared with the framework's task consumer, which holds a
+        blocking ``XREADGROUP`` on the same multiplexed connection. A blocking
+        command queues behind another blocking command on that connection, and
+        the client's watchdog measures a blocking command's deadline from
+        submission (``BLOCK`` + 0.5 s), so a queued ``XREAD`` always looks like
+        a server timeout: the transport drops the client and restarts its
+        managers. A non-blocking ``XREAD`` never stays in flight, so it cannot
+        trip the watchdog, and polling at ``block_ms`` keeps the same latency
+        it had as a block timeout.
         """
         last_ids: dict[str, str] = {}
         settings_seen: LogAggregatorSettings | None = None
@@ -152,9 +163,12 @@ class LogAggregatorWorker(ValkeyWorker):
 
                 entries = await client.xread(
                     keys_and_ids=cast("Mapping[str | bytes, str | bytes]", last_ids),
-                    options=StreamReadOptions(count=settings.batch_size, block_ms=settings.block_ms),
+                    options=StreamReadOptions(count=settings.batch_size),
                 )
-                for key_bytes, group in (entries or {}).items():
+                if not entries:
+                    await asyncio.sleep(max(settings.block_ms, 50) / 1000.0)
+                    continue
+                for key_bytes, group in entries.items():
                     key = key_bytes.decode() if isinstance(key_bytes, bytes) else str(key_bytes)
                     for entry_id, fields in group.items():
                         await self._copy(settings, key, fields)

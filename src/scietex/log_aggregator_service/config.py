@@ -38,6 +38,12 @@ class LogAggregatorSettings(msgspec.Struct, frozen=True, forbid_unknown_fields=T
     ``target_stream`` is the shared stream the aggregator writes; ``max_len`` and
     ``ttl_seconds`` are the retention policy it enforces on it. A ``max_len`` or
     ``ttl_seconds`` of ``0`` disables that half of the policy.
+
+    ``block_ms`` is the idle poll interval, not an ``XREAD`` block timeout: the
+    reader issues a non-blocking ``XREAD`` and sleeps this long when nothing
+    arrived. A blocking read would queue behind the framework task consumer's
+    own blocking read on the shared connection and be killed by the client's
+    timeout watchdog.
     """
 
     source_services: list[str] = msgspec.field(default_factory=list)

@@ -121,7 +121,7 @@ async def test_reader_loop_retries_expire_until_stream_exists(tmp_path) -> None:
     worker = _make_worker(tmp_path)
     client = AsyncMock()
     worker._client = client
-    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], ttl_seconds=3, scan_interval=0.0)
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], ttl_seconds=3, scan_interval=0.0, block_ms=10)
     client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
     client.xread.return_value = None
     # First EXPIRE misses (stream absent), second succeeds.
@@ -334,7 +334,7 @@ async def test_reader_loop_rescans_when_settings_change(tmp_path) -> None:
     client = AsyncMock()
     worker._client = client
     # A long scan interval: only the identity change can trigger a second SCAN.
-    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=3600.0)
+    worker._settings = LogAggregatorSettings(source_services=["ModbusGateway"], scan_interval=3600.0, block_ms=10)
     client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
 
     async def yield_to_loop(*args, **kwargs):

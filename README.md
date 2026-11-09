@@ -105,7 +105,7 @@ layer, or explicitly cleared with `null`, resolves to the value shown.
 | `max_len` | `100000` | `MAXLEN ~` applied on each write (`0` disables) |
 | `ttl_seconds` | `604800` | Whole-key TTL refreshed on a timer (`0` disables) |
 | `batch_size` | `200` | Entries per `XREAD` |
-| `block_ms` | `1000` | `XREAD` block timeout |
+| `block_ms` | `1000` | Idle poll interval in ms (the `XREAD` itself is non-blocking) |
 | `scan_interval` | `15.0` | Seconds between source-set SCANs |
 
 ## Development
