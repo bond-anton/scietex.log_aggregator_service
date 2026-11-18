@@ -134,7 +134,7 @@ class LogAggregatorWorker(ValkeyWorker):
         last_ids: dict[str, str] = {}
         settings_seen: LogAggregatorSettings | None = None
         last_scan = 0.0
-        last_expire = 0.0
+        next_expire = 0.0
         while True:
             try:
                 settings = self._settings
@@ -149,13 +149,13 @@ class LogAggregatorWorker(ValkeyWorker):
                     last_scan = now
                     settings_seen = settings
 
-                if settings.ttl_seconds > 0 and now - last_expire >= max(1.0, settings.ttl_seconds / 3):
+                if settings.ttl_seconds > 0 and now >= next_expire:
                     # EXPIRE is a no-op until the target stream exists (the first
                     # XADD creates it), so only advance the timer on success;
                     # otherwise the long interval would delay the TTL until the
                     # next window even though the stream now exists.
                     if await client.expire(settings.target_stream, settings.ttl_seconds):
-                        last_expire = now
+                        next_expire = now + max(1.0, settings.ttl_seconds / 3)
 
                 if not last_ids:
                     await asyncio.sleep(1.0)

@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -134,6 +135,39 @@ async def test_reader_loop_retries_expire_until_stream_exists(tmp_path) -> None:
         await task
 
     assert client.expire.await_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_expire_fires_on_first_iteration_before_ttl_of_uptime(tmp_path, monkeypatch) -> None:
+    """EXPIRE is attempted on the first iteration even at a small monotonic clock.
+
+    The deadline starts at 0.0, not at the current clock, so a worker that boots
+    shortly after the host still arms the whole-key TTL immediately instead of
+    waiting ``ttl/3`` seconds of host uptime for the first attempt.
+    """
+    # Patch the module's ``time`` binding, not ``time.monotonic`` itself:
+    # replacing the real function would freeze asyncio's event-loop clock and
+    # the sleeps below would never wake.
+    monkeypatch.setattr(
+        "scietex.log_aggregator_service.aggregator_worker.time",
+        SimpleNamespace(monotonic=lambda: 1.0),
+    )
+    worker = _make_worker(tmp_path)
+    client = AsyncMock()
+    worker._client = client
+    worker._settings = LogAggregatorSettings(
+        source_services=["ModbusGateway"], ttl_seconds=604800, scan_interval=0.0, block_ms=10
+    )
+    client.scan.return_value = (b"0", [b"scietex:ModbusGateway:abc:log"])
+    client.xread.return_value = None
+
+    task = asyncio.create_task(worker._reader_loop())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    client.expire.assert_awaited_once_with("scietex:log", 604800)
 
 
 @pytest.mark.asyncio
